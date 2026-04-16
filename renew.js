@@ -116,24 +116,26 @@ async function retry(page, fn, name, maxRetries = 3) {
 
     console.log(`🖱️ 选择应用 "${APP_NAME}"`);
     await retry(page, async () => {
-      const loading = page.locator('text=Loading...');
+      const loading = page.locator('text=Loading...').first();
       if (await loading.isVisible()) {
           console.log('⏳ 正在加载列表，等待中...');
           await loading.waitFor({ state: 'hidden', timeout: 30000 });
       }
-      const appLink = page.locator(`a:has-text("${APP_NAME}"), div:has-text("${APP_NAME}")`).filter({ visible: true }).first();
+      const appSelector = `text=${APP_NAME}`;
+      const appLink = page.locator(appSelector).filter({ visible: true }).first();
       await appLink.waitFor({ state: 'visible', timeout: 30000 });
-      await appLink.click();
+      await appLink.click({ delay: 500 });
     }, `选择应用 ${APP_NAME}`);
 
     console.log('⏳ 等待应用详情页加载...');
     await page.waitForLoadState('load');
+    await page.waitForTimeout(3000); 
     await page.screenshot({ path: 'step4_app_detail.png' });
     addToSummary('Step 4: 应用详情页', 'step4_app_detail.png');
 
     console.log('🚀 点击 "Redeploy App"');
     await retry(page, async () => {
-      const redeployBtn = page.locator('button:has-text("Redeploy App"), a:has-text("Redeploy App")').first();
+      const redeployBtn = page.locator('button:has-text("Redeploy App"), a:has-text("Redeploy App")').filter({ visible: true }).first();
       await redeployBtn.waitFor({ state: 'visible', timeout: 30000 });
       await redeployBtn.click();
     }, '点击 Redeploy App');
