@@ -8,7 +8,7 @@ const TG_TOKEN = process.env.TG_TOKEN;
 const TG_ID = process.env.TG_ID;
 const PROXY_URL = process.env.PROXY_URL;
 
-const LOGIN_URL = 'https://www.back4app.com/';
+const LOGIN_URL = 'https://www.back4app.com/login';
 
 async function sendTG(statusIcon, statusText, extra, imagePath) {
   if (!TG_TOKEN || !TG_ID) return;
@@ -80,39 +80,32 @@ async function retry(page, fn, name, maxRetries = 3) {
   var page = await context.newPage();
 
   try {
-    console.log('🌐 打开首页');
+    console.log('🌐 打开登录页');
     await page.goto(LOGIN_URL, { waitUntil: 'networkidle', timeout: 60000 });
-    await page.screenshot({ path: 'step1_landing.png' });
-    addToSummary('Step 1: 访问首页', 'step1_landing.png');
+    await page.screenshot({ path: 'step1_login_page.png' });
+    addToSummary('Step 1: 登录页', 'step1_login_page.png');
 
-    console.log('🔘 检查弹窗');
-    const understandBtn = page.locator('button:has-text("I understand"), button:has-text("I Understand")').first();
-    if (await understandBtn.isVisible().catch(() => false)) {
-        console.log('🔘 点击"我明白"');
-        await understandBtn.click();
-        await page.waitForTimeout(1000);
-    }
-
-    console.log('🖱️ 点击右上角 Log in');
+    console.log('🖱️ 点击 Continue with GitHub');
     await retry(page, async () => {
-      await page.locator('a:has-text("Log in"), a:has-text("Login")').first().click();
-      await page.waitForURL('**/login**', { timeout: 30000 });
-    }, '点击 Log in');
-    
-    await page.waitForSelector('input[type="email"], input[placeholder*="Email"]', { timeout: 30000 });
-    await page.screenshot({ path: 'step2_login_page.png' });
-    addToSummary('Step 2: 登录页面', 'step2_login_page.png');
+      await page.locator('button:has-text("Continue with GitHub")').click();
+      await page.waitForURL('**github.com/login**', { timeout: 30000 });
+    }, '点击 GitHub 登录');
 
-    console.log('📧 填写账号密码');
-    await page.locator('input[type="email"], input[placeholder*="Email"]').fill(ACC);
-    await page.locator('input[type="password"], input[placeholder*="Password"]').fill(ACC_PWD);
-    await page.screenshot({ path: 'step3_filled.png' });
-    addToSummary('Step 3: 填写信息', 'step3_filled.png');
+    console.log('⏳ 等待 GitHub 登录表单...');
+    await page.waitForSelector('input[name="login"], input[id="login_field"]', { timeout: 30000 });
+    await page.screenshot({ path: 'step2_github_login.png' });
+    addToSummary('Step 2: GitHub 登录', 'step2_github_login.png');
 
-    console.log('🖱️ 提交登录');
-    await page.getByRole('button', { name: 'Continue' }).click();
+    console.log('📧 填写 GitHub 账号密码');
+    await page.locator('input[name="login"], input[id="login_field"]').fill(ACC);
+    await page.locator('input[name="password"], input[id="password"]').fill(ACC_PWD);
+    await page.screenshot({ path: 'step3_github_filled.png' });
+    addToSummary('Step 3: 填写信息', 'step3_github_filled.png');
+
+    console.log('🖱️ 点击 Sign in');
+    await page.locator('input[type="submit"], button[type="submit"]').click();
     
-    console.log('⏳ 等待控制台加载...');
+    console.log('⏳ 等待跳转回 Back4app...');
     await page.waitForURL('**/dashboard**', { timeout: 60000 });
     await page.waitForLoadState('networkidle');
     await page.screenshot({ path: 'step4_dashboard.png' });
