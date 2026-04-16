@@ -51,6 +51,21 @@ function addToSummary(title, imagePath) {
   }
 }
 
+async function retry(page, fn, name, maxRetries = 3) {
+  for (let i = 1; i <= maxRetries; i++) {
+    try {
+      await fn();
+      return true;
+    } catch (e) {
+      console.log(`⚠️ ${name} 失败 (${i}/${maxRetries}): ${e.message}`);
+      if (i < maxRetries) {
+        await page.waitForTimeout(2000);
+      }
+    }
+  }
+  throw new Error(`${name} 重试 ${maxRetries} 次后失败`);
+}
+
 (async function main() {
   console.log('==================================================');
   console.log('Back4app 自动重新部署');
@@ -79,8 +94,10 @@ function addToSummary(title, imagePath) {
     }
 
     console.log('🖱️ 点击右上角 Log in');
-    await page.locator('a:has-text("Log in"), a:has-text("Login")').first().click();
-    await page.waitForURL('**/login**', { timeout: 30000 });
+    await retry(page, async () => {
+      await page.locator('a:has-text("Log in"), a:has-text("Login")').first().click();
+      await page.waitForURL('**/login**', { timeout: 30000 });
+    }, '点击 Log in');
     
     await page.waitForSelector('input[type="email"], input[placeholder*="Email"]', { timeout: 30000 });
     await page.screenshot({ path: 'step2_login_page.png' });
@@ -105,9 +122,11 @@ function addToSummary(title, imagePath) {
     await page.waitForTimeout(5000);
 
     console.log('🖱️ 选择应用 "b4app"');
-    const appLink = page.locator('text=b4app').first();
-    await appLink.waitFor({ state: 'visible', timeout: 30000 });
-    await appLink.click();
+    await retry(page, async () => {
+      const appLink = page.locator('text=b4app').first();
+      await appLink.waitFor({ state: 'visible', timeout: 30000 });
+      await appLink.click();
+    }, '选择应用 b4app');
 
     console.log('⏳ 等待应用详情页加载...');
     await page.waitForLoadState('networkidle');
@@ -115,9 +134,11 @@ function addToSummary(title, imagePath) {
     addToSummary('Step 5: 应用详情页', 'step5_app_detail.png');
 
     console.log('🚀 点击 "Redeploy App"');
-    const redeployBtn = page.locator('button:has-text("Redeploy App"), a:has-text("Redeploy App")').first();
-    await redeployBtn.waitFor({ state: 'visible', timeout: 30000 });
-    await redeployBtn.click();
+    await retry(page, async () => {
+      const redeployBtn = page.locator('button:has-text("Redeploy App"), a:has-text("Redeploy App")').first();
+      await redeployBtn.waitFor({ state: 'visible', timeout: 30000 });
+      await redeployBtn.click();
+    }, '点击 Redeploy App');
 
     console.log('⏳ 等待部署开始...');
     await page.waitForTimeout(3000); 
