@@ -93,7 +93,7 @@ async function retry(page, fn, name, maxRetries = 3) {
     addToSummary('Step 2: 填写信息', 'step2_filled.png');
 
     console.log('🖱️ 点击 Continue');
-    await page.locator('button:has-text("Continue")').click();
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
     
     console.log('⏳ 等待控制台加载...');
     await page.waitForURL('**/dashboard**', { timeout: 60000 });
