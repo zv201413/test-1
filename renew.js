@@ -70,13 +70,9 @@ function addToSummary(title, imagePath) {
     await page.screenshot({ path: 'step1_landing.png' });
     addToSummary('Step 1: 访问首页', 'step1_landing.png');
 
-    console.log('🖱️ 点击登录');
-    const loginBtn = page.getByRole('link', { name: 'Log in' });
-    if (await loginBtn.isVisible()) {
-        await loginBtn.click();
-    } else {
-        await page.goto('https://dashboard.back4app.com/login', { waitUntil: 'networkidle' });
-    }
+    console.log('🖱️ 点击右上角 Log in');
+    await page.locator('a:has-text("Log in"), a:has-text("Login")').first().click();
+    await page.waitForURL('**/login**', { timeout: 30000 });
     
     await page.waitForSelector('input[type="email"], input[placeholder*="Email"]', { timeout: 30000 });
     await page.screenshot({ path: 'step2_login_page.png' });
