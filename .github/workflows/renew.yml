@@ -13,6 +13,10 @@ on:
         description: '起始轮次 (用于分段恢复)'
         required: false
         default: '1'
+      max_parallel:
+        description: '同时运行的并发数 (默认1)'
+        required: false
+        default: '1'
 
 permissions:
   contents: write
@@ -20,6 +24,7 @@ permissions:
 env:
   T: ${{ github.event.inputs.T || '12' }}
   START_ROUND: ${{ github.event.inputs.start_round || '1' }}
+  MAX_PARALLEL: ${{ github.event.inputs.max_parallel || '1' }}
 
 jobs:
   setup:
@@ -27,6 +32,7 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       total_rounds: ${{ steps.set-matrix.outputs.total_rounds }}
+      max_parallel: ${{ steps.set-matrix.outputs.max_parallel }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -39,19 +45,23 @@ jobs:
           T: ${{ env.T }}
           MAX_HOURS: 6
         run: |
-          ACCOUNTS=$(echo "$ALL_SECRETS" | jq -r 'keys[] | select(startswith("EML_"))' | sed 's/EML_//' | shuf)
+          # 提取 EML 后缀并按数字大小排正序
+          ACCOUNTS=$(echo "$ALL_SECRETS" | jq -r 'keys[] | select(startswith("EML_")) | sub("EML_";"")' | sort -n)
           if [ -z "$ACCOUNTS" ]; then
             HAS_SINGLE=$(echo "$ALL_SECRETS" | jq -r 'keys[] | select(. == "EML")')
             if [ -n "$HAS_SINGLE" ]; then
-              echo "matrix=[\"SINGLE\"]" >> $GITHUB_OUTPUT
+              echo "matrix=[{\"acc\":\"SINGLE\", \"idx\":0}]" >> $GITHUB_OUTPUT
             else
               echo "Error: No EML_1 or EML secrets found."
               exit 1
             fi
           else
-            INDEX_ARRAY=$(echo "$ACCOUNTS" | jq -R . | jq -s -c .)
-            echo "matrix=$INDEX_ARRAY" >> $GITHUB_OUTPUT
+            # 将账号映射为严格按 0,1,2,3 递增的 JSON 数组
+            MATRIX_JSON=$(echo "$ACCOUNTS" | awk '{print "{\"acc\":\""$1"\", \"idx\":"NR-1"}"}' | jq -s -c '.')
+            echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
           fi
+          
+          echo "max_parallel=${{ env.MAX_PARALLEL }}" >> $GITHUB_OUTPUT
           
           TOTAL_ACCOUNTS=$(echo "$matrix" | jq 'length')
           ROUNDS_PER_ACCOUNT=$T
@@ -66,9 +76,9 @@ jobs:
     timeout-minutes: 360
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: ${{ fromJson(needs.setup.outputs.max_parallel) }}
       matrix:
-        account_index: ${{ fromJson(needs.setup.outputs.matrix) }}
+        include: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
       - name: Checkout repository
@@ -87,16 +97,6 @@ jobs:
           npx playwright install --with-deps chrome
           sudo apt-get update
           sudo apt-get install -y jq fonts-noto-cjk python3 wget bc
-
-      - name: Calculate account index
-        id: calc-index
-        shell: bash
-        run: |
-          if [ "${{ matrix.account_index }}" == "SINGLE" ]; then
-            echo "idx=0" >> $GITHUB_OUTPUT
-          else
-            echo "idx=${{ matrix.account_index }}" >> $GITHUB_OUTPUT
-          fi
 
       - name: Start Proxy Tunnel
         env:
@@ -126,28 +126,37 @@ jobs:
 
       - name: Run Extension Script
         env:
-          ACC: ${{ matrix.account_index == 'SINGLE' && secrets.EML || secrets[format('EML_{0}', matrix.account_index)] }}
-          ACC_PWD: ${{ matrix.account_index == 'SINGLE' && secrets.PWD || secrets[format('PWD_{0}', matrix.account_index)] }}
+          ACC: ${{ matrix.acc == 'SINGLE' && secrets.EML || secrets[format('EML_{0}', matrix.acc)] }}
+          ACC_PWD: ${{ matrix.acc == 'SINGLE' && secrets.PWD || secrets[format('PWD_{0}', matrix.acc)] }}
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_ID: ${{ secrets.TG_ID }}
           PROXY_URL: ${{ secrets.PROXY_URL }}
-          APP_NAME: ${{ matrix.account_index == 'SINGLE' && secrets.APP_NAME || secrets[format('APP_NAME_{0}', matrix.account_index)] }}
+          APP_NAME: ${{ matrix.acc == 'SINGLE' && secrets.APP_NAME || secrets[format('APP_NAME_{0}', matrix.acc)] }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           T: ${{ env.T }}
-          ACCOUNT_INDEX: ${{ steps.calc-index.outputs.idx }}
+          ACCOUNT_INDEX: ${{ matrix.idx }}
+          MAX_PARALLEL: ${{ needs.setup.outputs.max_parallel }}
           START_ROUND: ${{ env.START_ROUND }}
         run: node renew.js
 
-      - name: Persist status_${{ steps.calc-index.outputs.idx }}.json
+      - name: Upload Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ matrix.acc }}
+          path: "*.png"
+          retention-days: 5
+
+      - name: Persist status_${{ matrix.idx }}.json
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main || echo "No remote changes"
-          STATUS_FILE="status_${{ steps.calc-index.outputs.idx }}.json"
+          STATUS_FILE="status_${{ matrix.idx }}.json"
           if [ -f "$STATUS_FILE" ]; then
             git add "$STATUS_FILE"
-            git commit -m "chore: Update $STATUS_FILE for ${{ matrix.account_index }} [skip ci]" || echo "No changes"
+            git commit -m "chore: Update $STATUS_FILE for account ${{ matrix.acc }} [skip ci]" || echo "No changes"
             git push
           fi
 
@@ -158,7 +167,7 @@ jobs:
         env:
           T: ${{ env.T }}
         run: |
-          STATUS_FILE="status_${{ steps.calc-index.outputs.idx }}.json"
+          STATUS_FILE="status_${{ matrix.idx }}.json"
           if [ -f "$STATUS_FILE" ]; then
             CURRENT=$(jq -r '.currentRound // 1' "$STATUS_FILE")
             if [ "$CURRENT" -le "$T" ]; then
@@ -178,4 +187,4 @@ jobs:
         run: |
           sleep 60
           echo "Triggering workflow again for remaining rounds..."
-          gh workflow run renew.yml -f T="${{ env.T }}"
+          gh workflow run renew.yml -f T="${{ env.T }}" -f max_parallel="${{ env.MAX_PARALLEL }}"
