@@ -99,8 +99,16 @@ async function retry(page, fn, name, maxRetries = 3) {
 
   if (!ACC || !ACC_PWD) { console.log('❌ 未找到账号或密码'); process.exit(1); }
 
+  // 如果是从第1轮开始的全新任务，主动清理该账号残留的旧状态文件，防止被旧进度干扰直接结束
+  if (START_ROUND === 1) {
+    if (fs.existsSync(STATUS_FILE)) {
+      console.log(`🧹 发现残留的进度文件 ${STATUS_FILE}，清理以确保全新启动。`);
+      fs.unlinkSync(STATUS_FILE);
+    }
+  }
+
   const status = loadStatus();
-  let startRound = status.currentRound;
+  let startRound = START_ROUND > 1 ? START_ROUND : status.currentRound;
 
   // 动态分组错峰延迟计算：
   // 只有第一轮跑的时候才需要安排发车时间轴（非中途恢复）
@@ -218,14 +226,24 @@ async function runRenewLogic(page) {
   await page.screenshot({ path: 'step4_app_detail.png' });
   addToSummary('Step 4: 应用详情页', 'step4_app_detail.png');
 
-    console.log('🚀 点击 "Redeploy App"');
-    await retry(page, async () => {
-      const redeployBtn = page.locator('button:has-text("Redeploy App"), a:has-text("Redeploy App")').filter({ visible: true }).first();
-      await redeployBtn.waitFor({ state: 'visible', timeout: 30000 });
-      await redeployBtn.click();
-    }, '点击 Redeploy App');
+  console.log('🔍 检查当前是否已经在部署中...');
+  const isDeploying = await page.locator('text="Deploying"').filter({ visible: true }).count() > 0;
+  
+  if (isDeploying) {
+    console.log('✅ 检测到当前应用已经是 Deploying 状态，跳过点击按钮。');
+    await page.screenshot({ path: 'step5_redeploying.png' });
+    addToSummary('Step 5: 部署状态确认 (已在部署中)', 'step5_redeploying.png');
+    return; // 提前结束本轮核心逻辑，视为成功
+  }
 
-    console.log('⏳ 智能等待状态变更为 Deploying...');
+  console.log('🚀 点击 "Redeploy App"');
+  await retry(page, async () => {
+    const redeployBtn = page.locator('button:has-text("Redeploy App"), a:has-text("Redeploy App")').filter({ visible: true }).first();
+    await redeployBtn.waitFor({ state: 'visible', timeout: 30000 });
+    await redeployBtn.click();
+  }, '点击 Redeploy App');
+
+  console.log('⏳ 智能等待状态变更为 Deploying...');
     try {
       // 动态等待页面上出现 Deploying 文本，最长等 30 秒
       await page.waitForSelector('text="Deploying"', { state: 'visible', timeout: 30000 });
